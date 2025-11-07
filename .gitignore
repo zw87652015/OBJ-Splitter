@@ -1,0 +1,105 @@
+# OBJ Model Processor - Git Ignore File
+
+# Cache directory (model cache system) - stored in project folder
+.cache/
+*.cache
+
+# OBJ 3D model files (large binary files)
+*.obj
+*.mtl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyTest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.*.swp
+
+# OBJ files (optional - uncomment if you don't want to track test files)
+# *.obj
+# *.mtl
+
+# Output directories
+split_objects/
+output/
+exports/
+
+# Log files
+*.log
+
+# Backup files
+*.bak
+*.backup
+
+# Test files (optional)
+# test_*.obj
+# sample_*.obj

@@ -1,0 +1,20 @@
+File name: Xingyun.obj
+
+File Statistics
+Vertices: 497,458
+Faces: 864,848
+Objects:8
+Normals:0
+Texture Coordinates:0
+Materials:0
+
+Objects in File
+Group16790 (299998 faces)
+Group51962 (3244 faces)
+Group51967(76409 faces)
+Group51972(52773 faces)
+Group16805 (299998 faces)
+Group4089 (3244 faces)
+Group4094(76409 faces)
+Group4099 (52773 faces)
+

@@ -2,12 +2,14 @@ import sys
 import os
 import re
 import time
+import json
+from pathlib import Path
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QTextEdit, 
                              QFileDialog, QListWidget, QListWidgetItem, 
                              QGroupBox, QSplitter, QMessageBox, QProgressBar,
-                             QCheckBox, QOpenGLWidget, QSlider)
+                             QCheckBox, QOpenGLWidget, QSlider, QProgressDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 from OpenGL.GL import *
@@ -96,6 +98,16 @@ class OBJViewer(QOpenGLWidget):
         self.last_pos = None
         self.auto_rotate = False
         
+        # Camera movement
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self.rotation_sensitivity = 0.5
+        self.pan_sensitivity = 0.01
+        self.zoom_sensitivity = 0.001
+        
+        # Enable keyboard focus
+        self.setFocusPolicy(Qt.StrongFocus)
+        
         # LOD system
         self.lod_levels = []
         self.current_lod = 0  # 0 = highest quality
@@ -140,7 +152,8 @@ class OBJViewer(QOpenGLWidget):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
         
-        glTranslatef(0.0, 0.0, self.zoom)
+        # Apply camera transformations: pan, then zoom, then rotation
+        glTranslatef(self.pan_x, self.pan_y, self.zoom)
         glRotatef(self.rotation_x, 1, 0, 0)
         glRotatef(self.rotation_y, 0, 1, 0)
         
@@ -159,42 +172,76 @@ class OBJViewer(QOpenGLWidget):
             self.draw_single_object()
     
     def draw_single_object(self):
-        """Draw single selected object"""
-        if not self.vbo_data or self.current_lod >= len(self.vbo_data):
-            return
+        """Draw single selected object or multiple selected objects"""
+        if not self.show_all_objects and hasattr(self, 'selected_objects') and self.selected_objects:
+            # Draw multiple selected objects in single mode
+            self.draw_selected_objects()
+        else:
+            # Draw single object (original behavior)
+            if not self.vbo_data or self.current_lod >= len(self.vbo_data):
+                return
+                
+            vertex_data, normal_data, index_data, index_count = self.vbo_data[self.current_lod]
             
-        vertex_data, normal_data, index_data, index_count = self.vbo_data[self.current_lod]
-        
-        if index_count == 0:
-            return
-        
-        # Set color based on LOD level
-        lod_colors = [
-            (0.7, 0.7, 0.9),  # High quality - blueish
-            (0.7, 0.8, 0.8),  # Medium quality - slightly greenish
-            (0.8, 0.7, 0.7),  # Low quality - slightly reddish
-            (0.8, 0.8, 0.6),  # Very low quality - yellowish
-        ]
-        
-        color = lod_colors[min(self.current_lod, len(lod_colors) - 1)]
-        glColor3f(*color)
-        
-        # Use GPU buffers for fast rendering
+            if index_count == 0:
+                return
+            
+            # Set color based on LOD level
+            lod_colors = [
+                (0.7, 0.7, 0.9),  # High quality - blueish
+                (0.8, 0.8, 0.7),  # Medium quality - yellowish
+                (0.9, 0.7, 0.7),  # Low quality - reddish
+                (0.7, 0.9, 0.7),  # Lowest quality - greenish
+            ]
+            color = lod_colors[min(self.current_lod, len(lod_colors) - 1)]
+            glColor3fv(color)
+            
+            self.draw_vbo(vertex_data, normal_data, index_data, index_count)
+    
+    def draw_vbo(self, vertex_data, normal_data, index_data, index_count, is_selected=False):
+        """Draw VBO data with optional selection highlighting"""
+        # Set vertex and normal pointers
         glVertexPointer(3, GL_FLOAT, 0, vertex_data)
         glNormalPointer(GL_FLOAT, 0, normal_data)
         
-        # Draw all triangles in one GPU call
+        # Draw the main object
         glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, index_data)
         
-        # Optional: Draw wireframe (disable for better performance)
-        if index_count < 100000:  # Only draw wireframe for smaller models
+        # Draw selection highlight if needed
+        if is_selected:
             glDisable(GL_LIGHTING)
-            glColor3f(0.2, 0.2, 0.3)
-            glLineWidth(0.5)
+            glColor3f(1.0, 0.5, 0.0)  # Orange highlight
+            glLineWidth(3.0)
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
             glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, index_data)
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
             glEnable(GL_LIGHTING)
+    
+    def draw_selected_objects(self):
+        """Draw multiple selected objects in their original positions"""
+        if not self.all_objects_data or not self.selected_objects:
+            return
+            
+        for obj_name, (vbo_data_list, color, is_selected) in self.all_objects_data.items():
+            if obj_name not in self.selected_objects:
+                continue
+                
+            if not vbo_data_list or self.current_lod >= len(vbo_data_list):
+                continue
+            
+            vertex_data, normal_data, index_data, index_count = vbo_data_list[self.current_lod]
+            
+            if index_count == 0:
+                continue
+            
+            glPushMatrix()
+            
+            # Use original object colors in single mode (no selection highlighting)
+            glColor3fv(color)
+            
+            self.draw_vbo(vertex_data, normal_data, index_data, index_count, False)
+            
+            glPopMatrix()
     
     def draw_all_objects(self):
         """Draw all objects with selection highlighting"""
@@ -241,8 +288,30 @@ class OBJViewer(QOpenGLWidget):
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
                 glEnable(GL_LIGHTING)
         
-    def set_model(self, vertices, faces):
+    def set_model(self, vertices, faces, force_update=False, obj_name=None):
         """Set the model to display with LOD generation and GPU buffer creation"""
+        # Check if this is the same model to avoid unnecessary recreation
+        if not force_update and vertices == self.vertices and faces == self.faces:
+            # Same model, just update display
+            self.update()
+            return
+        
+        # Try to use cached single-object data if available
+        if obj_name and hasattr(self, 'single_object_cache') and obj_name in self.single_object_cache:
+            cached_verts, cached_faces, cached_vbo_data = self.single_object_cache[obj_name]
+            self.vertices = cached_verts
+            self.faces = cached_faces
+            self.vbo_data = cached_vbo_data
+            # Create LOD levels from cached data for display consistency
+            self.lod_levels = []
+            for i, (vertex_data, normal_data, index_data, index_count) in enumerate(cached_vbo_data):
+                # Use cached vertex data for LOD levels (simplified approach)
+                self.lod_levels.append((cached_verts, cached_faces))
+            self.current_lod = 0
+            print(f"Using cached single-object data for {obj_name}")
+            self.update()
+            return
+        
         # Auto-center and scale
         if vertices:
             verts = np.array(vertices)
@@ -252,14 +321,14 @@ class OBJViewer(QOpenGLWidget):
             # Auto-scale
             max_dim = np.max(np.abs(centered_verts))
             if max_dim > 0:
-                scaled_verts = centered_verts / max_dim * 2
+                scale = 2.0 / max_dim
+                scaled_verts = centered_verts * scale
             else:
                 scaled_verts = centered_verts
-            
-            self.vertices = scaled_verts.tolist()
         else:
-            self.vertices = vertices
-            
+            scaled_verts = []
+        
+        self.vertices = scaled_verts
         self.faces = faces
         
         # Generate LOD levels
@@ -346,18 +415,27 @@ class OBJViewer(QOpenGLWidget):
             dy = event.y() - self.last_pos.y()
             
             if event.buttons() & Qt.LeftButton:
-                self.rotation_x += dy
-                self.rotation_y += dx
+                # Rotation with adjustable sensitivity
+                self.rotation_x += dy * self.rotation_sensitivity
+                self.rotation_y += dx * self.rotation_sensitivity
                 self.update()
             elif event.buttons() & Qt.RightButton:
-                self.zoom += dy * 0.01
+                # Zoom with right mouse drag
+                self.zoom += dy * 0.02  # Increased sensitivity
+                if self.auto_lod:
+                    self.update_auto_lod()
+                self.update()
+            elif event.buttons() & Qt.MiddleButton:
+                # Pan with middle mouse
+                self.pan_x += dx * self.pan_sensitivity
+                self.pan_y -= dy * self.pan_sensitivity  # Inverted Y for natural pan
                 self.update()
                 
             self.last_pos = event.pos()
             
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
-        self.zoom += delta * 0.001
+        self.zoom += delta * self.zoom_sensitivity
         
         # Auto-LOD based on zoom level
         if self.auto_lod:
@@ -365,9 +443,58 @@ class OBJViewer(QOpenGLWidget):
         
         self.update()
     
+    def keyPressEvent(self, event):
+        """Keyboard controls for camera movement"""
+        step = 0.1
+        rotation_step = 5.0
+        
+        if event.key() == Qt.Key_W:
+            self.pan_y += step
+        elif event.key() == Qt.Key_S:
+            self.pan_y -= step
+        elif event.key() == Qt.Key_A:
+            self.pan_x -= step
+        elif event.key() == Qt.Key_D:
+            self.pan_x += step
+        elif event.key() == Qt.Key_Q:
+            self.rotation_y -= rotation_step
+        elif event.key() == Qt.Key_E:
+            self.rotation_y += rotation_step
+        elif event.key() == Qt.Key_R:
+            self.rotation_x -= rotation_step
+        elif event.key() == Qt.Key_F:
+            self.rotation_x += rotation_step
+        elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
+            self.zoom += 0.5
+            if self.auto_lod:
+                self.update_auto_lod()
+        elif event.key() == Qt.Key_Minus:
+            self.zoom -= 0.5
+            if self.auto_lod:
+                self.update_auto_lod()
+        elif event.key() == Qt.Key_Space:
+            # Reset camera
+            self.reset_camera()
+        else:
+            return  # Don't update for unrecognized keys
+            
+        self.update()
+    
+    def reset_camera(self):
+        """Reset camera to default position"""
+        self.rotation_x = 0
+        self.rotation_y = 0
+        self.zoom = -5.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        if self.auto_lod:
+            self.update_auto_lod()
+    
     def update_auto_lod(self):
         """Automatically adjust LOD based on zoom level"""
-        if not self.lod_levels:
+        # Check both LOD levels and VBO data for cached objects
+        max_lod = max(len(self.lod_levels), len(self.vbo_data)) if self.vbo_data else len(self.lod_levels)
+        if max_lod == 0:
             return
             
         # Map zoom to LOD level (further away = lower LOD)
@@ -380,15 +507,18 @@ class OBJViewer(QOpenGLWidget):
         else:  # Far away
             target_lod = 3
             
-        target_lod = min(target_lod, len(self.lod_levels) - 1)
+        target_lod = min(target_lod, max_lod - 1)
         
         if target_lod != self.current_lod:
             self.current_lod = target_lod
             print(f"Auto-switched to LOD {self.current_lod}")
+            self.update()
     
     def set_lod_level(self, level):
         """Manually set LOD level"""
-        if 0 <= level < len(self.lod_levels):
+        # Check both LOD levels and VBO data for cached objects
+        max_lod = max(len(self.lod_levels), len(self.vbo_data)) if self.vbo_data else len(self.lod_levels)
+        if 0 <= level < max_lod:
             self.current_lod = level
             self.auto_lod = False
             self.update()
@@ -401,7 +531,7 @@ class OBJViewer(QOpenGLWidget):
             self.update_auto_lod()
         print(f"Auto-LOD: {'ON' if self.auto_lod else 'OFF'}")
     
-    def load_all_objects(self, parser, file_path=None):
+    def load_all_objects(self, parser, file_path=None, parent_widget=None):
         """Load all objects from parser for multi-object view"""
         print("Loading all objects for multi-view...")
         
@@ -411,8 +541,22 @@ class OBJViewer(QOpenGLWidget):
             cached_data = cache.load_cache(file_path)
             if cached_data:
                 self.all_objects_data = cached_data['all_objects_data']
+                # Store single-object data for quick access
+                self.single_object_cache = cached_data.get('single_object_cache', {})
                 print(f"✅ Loaded {len(self.all_objects_data)} objects from cache")
+                # Set viewer to show all objects and update display
+                self.show_all_objects = True
+                self.update()
                 return
+        
+        # Show progress dialog for uncached models (only if there are objects to process)
+        progress_dialog = None
+        if parent_widget and len(parser.objects) > 0:
+            progress_dialog = QProgressDialog("Processing model (generating LODs and GPU buffers)...", "Cancel", 0, 100, parent_widget)
+            progress_dialog.setWindowTitle("Loading Model")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.setValue(10)  # Initial progress
         
         start_time = time.time()
         self.all_objects_data = {}
@@ -429,7 +573,9 @@ class OBJViewer(QOpenGLWidget):
             all_vertices.extend(vertices)
         
         if not all_vertices:
-            print("No objects to load")
+            # Only print message if we actually tried to load a file
+            if file_path:
+                print("No objects to load")
             return
         
         # Calculate global center and scale
@@ -442,7 +588,16 @@ class OBJViewer(QOpenGLWidget):
         random.seed(42)  # Consistent colors
         
         # Now process each object with global transform
-        for obj_name, (vertices, faces) in object_vertices.items():
+        total_objects = len(object_vertices)
+        for i, (obj_name, (vertices, faces)) in enumerate(object_vertices.items()):
+            # Update progress
+            if progress_dialog:
+                progress = 20 + int((i / total_objects) * 60)  # 20-80% for object processing
+                progress_dialog.setValue(progress)
+                if progress_dialog.wasCanceled():
+                    print("Model loading cancelled by user")
+                    return
+            
             # Apply global centering and scaling
             verts = np.array(vertices)
             centered_verts = verts - global_center
@@ -469,12 +624,56 @@ class OBJViewer(QOpenGLWidget):
         processing_time = time.time() - start_time
         print(f"Loaded {len(self.all_objects_data)} objects with global transform in {processing_time:.2f}s")
         
+        # Generate single-object cache data (centered individually)
+        self.single_object_cache = {}
+        for i, (obj_name, (vertices, faces)) in enumerate(object_vertices.items()):
+            # Update progress
+            if progress_dialog:
+                progress = 80 + int((i / total_objects) * 15)  # 80-95% for single-object cache
+                progress_dialog.setValue(progress)
+                if progress_dialog.wasCanceled():
+                    print("Model loading cancelled by user")
+                    return
+            
+            # Individual centering and scaling for single objects
+            verts = np.array(vertices)
+            center = np.mean(verts, axis=0)
+            centered_verts = verts - center
+            
+            max_dim = np.max(np.abs(centered_verts))
+            if max_dim > 0:
+                scale = 2.0 / max_dim
+                scaled_verts = (centered_verts * scale).tolist()
+            else:
+                scaled_verts = centered_verts.tolist()
+            
+            # Generate LOD levels for single object
+            lod_levels = MeshSimplifier.create_lod_levels(scaled_verts, faces)
+            
+            # Create GPU buffers for single object
+            vbo_data_list = []
+            for verts, lod_faces in lod_levels:
+                vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(verts, lod_faces)
+                vbo_data_list.append((vertex_data, normal_data, index_data, index_count))
+            
+            self.single_object_cache[obj_name] = (scaled_verts, faces, vbo_data_list)
+        
         # Save to cache if file_path is provided
         if file_path:
+            if progress_dialog:
+                progress_dialog.setValue(98)  # Almost done
+                progress_dialog.setLabelText("Saving to cache...")
+            
             cache_data = {
-                'all_objects_data': self.all_objects_data
+                'all_objects_data': self.all_objects_data,
+                'single_object_cache': self.single_object_cache
             }
             cache.save_cache(file_path, cache_data, processing_time)
+        
+        # Close progress dialog
+        if progress_dialog:
+            progress_dialog.setValue(100)
+            progress_dialog.close()
     
     def toggle_object_selection(self, obj_name):
         """Toggle selection state of an object"""
@@ -699,9 +898,21 @@ class OBJProcessorApp(QMainWindow):
         
         # Create splitter for resizable panels
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)  # Prevent panels from being collapsed completely
+        splitter.setHandleWidth(5)  # Make splitter handles more visible
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #d0d0d0;
+                border: 1px solid #999;
+            }
+            QSplitter::handle:hover {
+                background-color: #a0a0a0;
+            }
+        """)
         
         # Left panel - File info and objects list
         left_panel = QWidget()
+        left_panel.setMinimumWidth(200)  # Minimum width for objects panel
         left_layout = QVBoxLayout(left_panel)
         
         # File statistics
@@ -749,41 +960,48 @@ class OBJProcessorApp(QMainWindow):
         
         # Middle panel - 3D Viewer
         middle_panel = QWidget()
+        middle_panel.setMinimumWidth(400)  # Minimum width for 3D viewer
         middle_layout = QVBoxLayout(middle_panel)
         
         self.viewer_group = QGroupBox('3D Viewer')
         viewer_layout = QVBoxLayout()
         
         self.viewer = OBJViewer()
-        viewer_layout.addWidget(self.viewer)
+        viewer_layout.addWidget(self.viewer, 1)  # Give viewer stretch factor of 1
         
-        # Viewer controls
-        viewer_controls = QHBoxLayout()
+        # Compact controls bar - combine viewer and LOD controls
+        controls_layout = QHBoxLayout()
         
-        # View mode toggle
-        self.show_all_checkbox = QCheckBox('Show All Objects')
-        self.show_all_checkbox.stateChanged.connect(self.toggle_show_all)
-        viewer_controls.addWidget(self.show_all_checkbox)
-        
-        viewer_controls.addWidget(QLabel('Left-drag: Rotate | Right-drag/Scroll: Zoom'))
-        viewer_controls.addStretch()
-        
-        self.reset_view_button = QPushButton('Reset View')
-        self.reset_view_button.clicked.connect(self.reset_viewer)
-        viewer_controls.addWidget(self.reset_view_button)
-        viewer_layout.addLayout(viewer_controls)
-        
-        # LOD controls
-        lod_controls = QHBoxLayout()
+        # View mode toggle - use button instead of checkbox
+        self.show_all_button = QPushButton('Full Model')
+        self.show_all_button.setCheckable(True)
+        self.show_all_button.setChecked(True)  # Start with full model viewing mode
+        self.show_all_button.clicked.connect(self.toggle_show_all)
+        # Style the toggle button
+        self.show_all_button.setStyleSheet("""
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: white;
+                border: 1px solid #45a049;
+            }
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                padding: 2px 8px;
+            }
+        """)
+        controls_layout.addWidget(self.show_all_button)
         
         # Auto-LOD checkbox
         self.auto_lod_checkbox = QCheckBox('Auto LOD')
         self.auto_lod_checkbox.setChecked(True)
         self.auto_lod_checkbox.stateChanged.connect(self.toggle_auto_lod)
-        lod_controls.addWidget(self.auto_lod_checkbox)
+        controls_layout.addWidget(self.auto_lod_checkbox)
         
-        # LOD slider
-        lod_controls.addWidget(QLabel('Quality:'))
+        # LOD quality
+        controls_layout.addWidget(QLabel('Q:'))
+        
+        # LOD slider - compact
         self.lod_slider = QSlider(Qt.Horizontal)
         self.lod_slider.setMinimum(0)
         self.lod_slider.setMaximum(3)
@@ -791,14 +1009,27 @@ class OBJProcessorApp(QMainWindow):
         self.lod_slider.setTickPosition(QSlider.TicksBelow)
         self.lod_slider.setTickInterval(1)
         self.lod_slider.valueChanged.connect(self.on_lod_slider_changed)
-        lod_controls.addWidget(self.lod_slider)
+        self.lod_slider.setMaximumWidth(120)  # Even more compact
+        self.lod_slider.setMaximumHeight(20)  # Limit height
+        controls_layout.addWidget(self.lod_slider)
         
         # LOD labels
-        lod_controls.addWidget(QLabel('High'))
-        lod_controls.addStretch()
-        lod_controls.addWidget(QLabel('Low'))
+        controls_layout.addWidget(QLabel('H'))
+        controls_layout.addWidget(QLabel('L'))
         
-        viewer_layout.addLayout(lod_controls)
+        controls_layout.addStretch()
+        
+        # Reset button
+        self.reset_view_button = QPushButton('Reset')
+        self.reset_view_button.clicked.connect(self.reset_viewer)
+        self.reset_view_button.setMaximumHeight(20)  # Compact button
+        controls_layout.addWidget(self.reset_view_button)
+        
+        # Help text
+        controls_layout.addWidget(QLabel('Drag:Rotate | Scroll:Zoom'))
+        
+        # Add compact controls
+        viewer_layout.addLayout(controls_layout)
         
         self.viewer_group.setLayout(viewer_layout)
         middle_layout.addWidget(self.viewer_group)
@@ -807,6 +1038,7 @@ class OBJProcessorApp(QMainWindow):
         
         # Right panel - Details display
         right_panel = QWidget()
+        right_panel.setMinimumWidth(250)  # Minimum width for details panel
         right_layout = QVBoxLayout(right_panel)
         
         # Object details
@@ -821,9 +1053,15 @@ class OBJProcessorApp(QMainWindow):
         
         splitter.addWidget(right_panel)
         
-        # Set splitter proportions
-        splitter.setSizes([350, 700, 550])
+        # Set splitter proportions - give more space to 3D viewer
+        splitter.setSizes([300, 900, 400])
         main_layout.addWidget(splitter)
+        
+        # Store splitter reference for state management
+        self.splitter = splitter
+        
+        # Restore splitter state if available
+        self.restore_splitter_state()
         
         # Menu bar
         menubar = self.menuBar()
@@ -869,8 +1107,8 @@ class OBJProcessorApp(QMainWindow):
         self.viewer.vertices = []
         self.viewer.faces = []
         
-        # Reset UI state
-        self.show_all_checkbox.setChecked(False)
+        # Reset UI state (keep Show All mode)
+        self.show_all_button.setChecked(True)  # Keep full model viewing mode
         self.objects_list.clear()
         self.details_text.clear()
         self.stats_label.setText('Load an OBJ file to view statistics')
@@ -911,9 +1149,20 @@ Materials: {stats['materials']}"""
             self.objects_list.addItem(item)
         
         self.export_button.setEnabled(True)
+        
+        # Since we start in full model mode, load all objects for display
+        if self.show_all_button.isChecked():
+            self.viewer.load_all_objects(self.parser, self.current_file, self)
+            # Update viewer controls
+            self.update_viewer_controls()
     
     def on_object_clicked(self, item):
         """Handle object click (text click) - show details"""
+        # Disable if no file is loaded
+        if not self.current_file or len(self.parser.objects) == 0:
+            self.statusBar().showMessage('Please load an OBJ file first')
+            return
+        
         obj_name = item.data(Qt.UserRole)
         obj_faces = self.parser.objects.get(obj_name, [])
         
@@ -963,18 +1212,39 @@ First 10 faces:
         self.details_text.setText(details)
         
         # Update 3D viewer only in single-object mode
-        if not self.show_all_checkbox.isChecked():
+        if not self.show_all_button.isChecked():
             vertices, faces = self.parser.get_object_vertices_for_display(obj_name)
-            self.viewer.set_model(vertices, faces)
+            self.viewer.set_model(vertices, faces, obj_name=obj_name)
             self.statusBar().showMessage(f'Viewing: {obj_name}')
     
     def on_object_checkbox_changed(self, item):
-        """Handle checkbox state change - toggle highlight in all-objects view"""
-        if not self.show_all_checkbox.isChecked():
-            # In single-object mode, checkboxes are only for export selection
+        """Handle checkbox state change - toggle highlight or display in single mode"""
+        # Disable if no file is loaded
+        if not self.current_file or len(self.parser.objects) == 0:
+            self.statusBar().showMessage('Please load an OBJ file first')
             return
         
         obj_name = item.data(Qt.UserRole)
+        
+        if not self.show_all_button.isChecked():
+            # In single-object mode, checkboxes control which objects to display
+            if item.checkState() == Qt.Checked:
+                self.viewer.selected_objects.add(obj_name)
+            else:
+                self.viewer.selected_objects.discard(obj_name)
+            
+            # Update display to show selected objects
+            self.viewer.update()
+            
+            # Update status message
+            selected_count = len(self.viewer.selected_objects)
+            if selected_count == 0:
+                self.statusBar().showMessage('Single Object View - Check objects to display')
+            elif selected_count == 1:
+                self.statusBar().showMessage(f'Single Object View - Displaying 1 object')
+            else:
+                self.statusBar().showMessage(f'Single Object View - Displaying {selected_count} objects')
+            return
         
         # Update viewer selection based on checkbox state
         if item.checkState() == Qt.Checked:
@@ -998,11 +1268,73 @@ First 10 faces:
             item = self.objects_list.item(i)
             item.setCheckState(Qt.Unchecked)
     
+    def toggle_show_all(self, checked):
+        """Toggle between single object and all objects view"""
+        # Disable mode switching if no file is loaded
+        if not self.current_file or len(self.parser.objects) == 0:
+            # Revert the button state
+            self.show_all_button.setChecked(not checked)
+            self.statusBar().showMessage('Please load an OBJ file first')
+            return
+        
+        show_all = checked
+        self.viewer.set_show_all_objects(show_all)
+        
+        # Update button text and appearance
+        if show_all:
+            self.show_all_button.setText('Full Model')
+            # Load all objects if not already loaded
+            if not self.viewer.all_objects_data:
+                self.viewer.load_all_objects(self.parser, self.current_file, self)
+            
+            # Sync checkbox states with viewer selection
+            for i in range(self.objects_list.count()):
+                item = self.objects_list.item(i)
+                obj_name = item.data(Qt.UserRole)
+                item.setCheckState(Qt.Checked if obj_name in self.viewer.selected_objects else Qt.Unchecked)
+        else:
+            self.show_all_button.setText('Single Object')
+            # Clear viewer selections when switching to single mode
+            self.viewer.selected_objects.clear()
+            # Clear all checkbox selections for clean start
+            for i in range(self.objects_list.count()):
+                self.objects_list.item(i).setCheckState(Qt.Unchecked)
+        
+        self.update_viewer_controls()
+    
+    def update_viewer_controls(self):
+        """Update viewer controls based on current mode"""
+        # Check if file is loaded
+        has_file = self.current_file and len(self.parser.objects) > 0
+        
+        # Enable/disable controls based on file state
+        self.objects_list.setEnabled(has_file)
+        self.export_button.setEnabled(has_file)
+        
+        if not has_file:
+            self.statusBar().showMessage('Please load an OBJ file first')
+            return
+        
+        # Object list should always be enabled when file is loaded
+        # (for viewing in single mode and export in both modes)
+        self.objects_list.setEnabled(True)
+        
+        # Update status message
+        is_full_model = self.show_all_button.isChecked()
+        if is_full_model:
+            self.statusBar().showMessage('Full Model View - Click objects to highlight')
+        else:
+            selected_count = len(self.viewer.selected_objects)
+            if selected_count == 0:
+                self.statusBar().showMessage('Single Object View - Check objects to display')
+            elif selected_count == 1:
+                self.statusBar().showMessage(f'Single Object View - Displaying 1 object')
+            else:
+                self.statusBar().showMessage(f'Single Object View - Displaying {selected_count} objects')
+    
     def reset_viewer(self):
         """Reset viewer to default position"""
-        self.viewer.rotation_x = 0
-        self.viewer.rotation_y = 0
-        self.viewer.zoom = -5.0
+        self.viewer.reset_camera()
         self.viewer.current_lod = 0
         self.lod_slider.setValue(0)
         self.viewer.update()
@@ -1014,35 +1346,14 @@ First 10 faces:
     def toggle_auto_lod(self, state):
         """Toggle auto-LOD"""
         self.viewer.toggle_auto_lod()
+        
         # Enable/disable slider based on auto-LOD state
         self.lod_slider.setEnabled(not self.viewer.auto_lod)
         if self.viewer.auto_lod:
             self.viewer.update_auto_lod()
     
-    def toggle_show_all(self, state):
-        """Toggle between single object and all objects view"""
-        show_all = (state == Qt.Checked)
-        self.viewer.set_show_all_objects(show_all)
-        
-        if show_all:
-            # Load all objects if not already loaded
-            if not self.viewer.all_objects_data:
-                self.viewer.load_all_objects(self.parser, self.current_file)
-            
-            # Sync checkbox states with viewer selection
-            for i in range(self.objects_list.count()):
-                item = self.objects_list.item(i)
-                obj_name = item.data(Qt.UserRole)
-                if obj_name in self.viewer.selected_objects:
-                    item.setCheckState(Qt.Checked)
-            
-            self.statusBar().showMessage('Showing all objects - Check boxes to highlight')
-        else:
-            self.statusBar().showMessage('Single object view')
-    
     def export_selected_objects(self):
-        """Export selected objects as printable OBJ files"""
-        # Get selected objects
+        """Export selected objects as printable OBJ"""
         selected_objects = []
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
@@ -1253,6 +1564,38 @@ Maximum cache size is limited to 1 GB."""
                 self, 'Cache Cleanup',
                 'No old cache entries to clean up.'
             )
+    
+    def restore_splitter_state(self):
+        """Restore splitter sizes from saved state"""
+        try:
+            settings_file = Path(__file__).parent / ".cache" / "ui_settings.json"
+            if settings_file.exists():
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                    if 'splitter_sizes' in settings:
+                        self.splitter.setSizes(settings['splitter_sizes'])
+        except Exception as e:
+            print(f"Could not restore splitter state: {e}")
+    
+    def save_splitter_state(self):
+        """Save current splitter sizes"""
+        try:
+            settings_file = Path(__file__).parent / ".cache" / "ui_settings.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            settings = {
+                'splitter_sizes': self.splitter.sizes()
+            }
+            
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Could not save splitter state: {e}")
+    
+    def closeEvent(self, event):
+        """Save splitter state when closing"""
+        self.save_splitter_state()
+        event.accept()
 
 
 def main():

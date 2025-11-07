@@ -63,3 +63,14 @@
 - Risk/Follow-up: Users need to add their own test files locally
 - Breaking: no
 - Tests Needed: no
+
+📜 Log Entry
+- Date: 2025-11-08
+- Type: perf-optimize
+- Module: model_cache.py
+- Summary: Prevent duplicate cache files for identical content hashes
+- Reason: Multiple files with same content were creating duplicate cache files
+- Alternatives: Keep duplicates; use content-addressable storage; implemented hash-based deduplication
+- Risk/Follow-up: Clear cache must handle reference counting (implemented)
+- Breaking: no
+- Tests Needed: no

@@ -153,6 +153,21 @@ class ModelCache:
         
         cache_path = self.get_cache_path(file_hash)
         
+        # Check if cache already exists for this hash (duplicate content)
+        if cache_path.exists():
+            print(f"Cache already exists for this content (duplicate file)")
+            # Just update index to include this path
+            self.cache_index[file_path] = {
+                'hash': file_hash,
+                'original_name': os.path.basename(file_path),
+                'cached_at': time.time(),
+                'last_accessed': time.time(),
+                'processing_time': processing_time,
+                'cache_size_mb': cache_path.stat().st_size / (1024 * 1024)
+            }
+            self.save_index()
+            return True
+        
         try:
             print(f"Saving to cache...")
             start_time = time.time()
@@ -184,16 +199,26 @@ class ModelCache:
     def clear_cache(self, file_path=None):
         """Clear cache for specific file or all files"""
         if file_path:
-            # Clear specific file
+            # Clear specific file path from index
             file_path = str(file_path)
             if file_path in self.cache_index:
                 cache_entry = self.cache_index[file_path]
-                cache_path = self.get_cache_path(cache_entry['hash'])
+                file_hash = cache_entry['hash']
                 
-                if cache_path.exists():
-                    cache_path.unlink()
-                
+                # Remove this path from index
                 del self.cache_index[file_path]
+                
+                # Check if any other paths reference this hash
+                paths_with_hash = [path for path, entry in self.cache_index.items() 
+                                  if entry['hash'] == file_hash]
+                
+                if not paths_with_hash:
+                    # No other paths reference this hash, delete cache file
+                    cache_path = self.get_cache_path(file_hash)
+                    if cache_path.exists():
+                        cache_path.unlink()
+                        print(f"Cache file deleted (no longer referenced)")
+                
                 self.save_index()
                 print(f"Cache cleared for: {os.path.basename(file_path)}")
         else:

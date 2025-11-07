@@ -153,6 +153,9 @@ class ModelCache:
         
         cache_path = self.get_cache_path(file_hash)
         
+        # Ensure cache directory exists
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
         # Check if cache already exists for this hash (duplicate content)
         if cache_path.exists():
             print(f"Cache already exists for this content (duplicate file)")

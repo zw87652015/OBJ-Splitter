@@ -74,3 +74,14 @@
 - Risk/Follow-up: Clear cache must handle reference counting (implemented)
 - Breaking: no
 - Tests Needed: no
+
+📜 Log Entry
+- Date: 2025-11-08
+- Type: bug-fix
+- Module: model_cache.py
+- Summary: Fix cache directory not found error when saving cache
+- Reason: Cache directory could be deleted between init and save operations
+- Alternatives: Check existence each time; create on demand; implemented ensure directory exists
+- Risk/Follow-up: None; defensive programming
+- Breaking: no
+- Tests Needed: no

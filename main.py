@@ -5,13 +5,14 @@ import time
 import json
 from pathlib import Path
 import numpy as np
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QTextEdit, 
                              QFileDialog, QListWidget, QListWidgetItem, 
                              QGroupBox, QSplitter, QMessageBox, QProgressBar,
-                             QCheckBox, QOpenGLWidget, QSlider, QProgressDialog)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont
+                             QCheckBox, QSlider, QProgressDialog)
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from model_cache import get_cache
@@ -106,7 +107,7 @@ class OBJViewer(QOpenGLWidget):
         self.zoom_sensitivity = 0.001
         
         # Enable keyboard focus
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # LOD system
         self.lod_levels = []
@@ -411,21 +412,21 @@ class OBJViewer(QOpenGLWidget):
         
     def mouseMoveEvent(self, event):
         if self.last_pos:
-            dx = event.x() - self.last_pos.x()
-            dy = event.y() - self.last_pos.y()
+            dx = event.pos().x() - self.last_pos.x()
+            dy = event.pos().y() - self.last_pos.y()
             
-            if event.buttons() & Qt.LeftButton:
+            if event.buttons() & Qt.MouseButton.LeftButton:
                 # Rotation with adjustable sensitivity
                 self.rotation_x += dy * self.rotation_sensitivity
                 self.rotation_y += dx * self.rotation_sensitivity
                 self.update()
-            elif event.buttons() & Qt.RightButton:
+            elif event.buttons() & Qt.MouseButton.RightButton:
                 # Zoom with right mouse drag
                 self.zoom += dy * 0.02  # Increased sensitivity
                 if self.auto_lod:
                     self.update_auto_lod()
                 self.update()
-            elif event.buttons() & Qt.MiddleButton:
+            elif event.buttons() & Qt.MouseButton.MiddleButton:
                 # Pan with middle mouse
                 self.pan_x += dx * self.pan_sensitivity
                 self.pan_y -= dy * self.pan_sensitivity  # Inverted Y for natural pan
@@ -448,31 +449,31 @@ class OBJViewer(QOpenGLWidget):
         step = 0.1
         rotation_step = 5.0
         
-        if event.key() == Qt.Key_W:
+        if event.key() == Qt.Key.Key_W:
             self.pan_y += step
-        elif event.key() == Qt.Key_S:
+        elif event.key() == Qt.Key.Key_S:
             self.pan_y -= step
-        elif event.key() == Qt.Key_A:
+        elif event.key() == Qt.Key.Key_A:
             self.pan_x -= step
-        elif event.key() == Qt.Key_D:
+        elif event.key() == Qt.Key.Key_D:
             self.pan_x += step
-        elif event.key() == Qt.Key_Q:
+        elif event.key() == Qt.Key.Key_Q:
             self.rotation_y -= rotation_step
-        elif event.key() == Qt.Key_E:
+        elif event.key() == Qt.Key.Key_E:
             self.rotation_y += rotation_step
-        elif event.key() == Qt.Key_R:
+        elif event.key() == Qt.Key.Key_R:
             self.rotation_x -= rotation_step
-        elif event.key() == Qt.Key_F:
+        elif event.key() == Qt.Key.Key_F:
             self.rotation_x += rotation_step
-        elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
+        elif event.key() == Qt.Key.Key_Plus or event.key() == Qt.Key.Key_Equal:
             self.zoom += 0.5
             if self.auto_lod:
                 self.update_auto_lod()
-        elif event.key() == Qt.Key_Minus:
+        elif event.key() == Qt.Key.Key_Minus:
             self.zoom -= 0.5
             if self.auto_lod:
                 self.update_auto_lod()
-        elif event.key() == Qt.Key_Space:
+        elif event.key() == Qt.Key.Key_Space:
             # Reset camera
             self.reset_camera()
         else:
@@ -554,7 +555,7 @@ class OBJViewer(QOpenGLWidget):
         if parent_widget and len(parser.objects) > 0:
             progress_dialog = QProgressDialog("Processing model (generating LODs and GPU buffers)...", "Cancel", 0, 100, parent_widget)
             progress_dialog.setWindowTitle("Loading Model")
-            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
             progress_dialog.setMinimumDuration(0)  # Show immediately
             progress_dialog.setValue(10)  # Initial progress
         
@@ -882,7 +883,7 @@ class OBJProcessorApp(QMainWindow):
         # File selection section
         file_layout = QHBoxLayout()
         self.file_label = QLabel('No file selected')
-        self.file_label.setFont(QFont('Arial', 10, QFont.Bold))
+        self.file_label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
         self.browse_button = QPushButton('Browse OBJ File')
         self.browse_button.clicked.connect(self.browse_file)
         
@@ -897,7 +898,7 @@ class OBJProcessorApp(QMainWindow):
         main_layout.addWidget(self.progress_bar)
         
         # Create splitter for resizable panels
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)  # Prevent panels from being collapsed completely
         splitter.setHandleWidth(5)  # Make splitter handles more visible
         splitter.setStyleSheet("""
@@ -1002,11 +1003,11 @@ class OBJProcessorApp(QMainWindow):
         controls_layout.addWidget(QLabel('Q:'))
         
         # LOD slider - compact
-        self.lod_slider = QSlider(Qt.Horizontal)
+        self.lod_slider = QSlider(Qt.Orientation.Horizontal)
         self.lod_slider.setMinimum(0)
         self.lod_slider.setMaximum(3)
         self.lod_slider.setValue(0)
-        self.lod_slider.setTickPosition(QSlider.TicksBelow)
+        self.lod_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.lod_slider.setTickInterval(1)
         self.lod_slider.valueChanged.connect(self.on_lod_slider_changed)
         self.lod_slider.setMaximumWidth(120)  # Even more compact
@@ -1143,16 +1144,22 @@ Materials: {stats['materials']}"""
         self.objects_list.clear()
         for obj_name, obj_faces in self.parser.objects.items():
             item = QListWidgetItem(f"{obj_name} ({len(obj_faces)} faces)")
-            item.setData(Qt.UserRole, obj_name)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.ItemDataRole.UserRole, obj_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
             self.objects_list.addItem(item)
         
         self.export_button.setEnabled(True)
         
         # Since we start in full model mode, load all objects for display
         if self.show_all_button.isChecked():
-            self.viewer.load_all_objects(self.parser, self.current_file, self)
+            # Ensure viewer is set to show all objects
+            self.viewer.set_show_all_objects(True)
+            # Update button text to reflect Full Model mode
+            self.show_all_button.setText('Full Model')
+            # Load all objects if not already loaded
+            if not self.viewer.all_objects_data:
+                self.viewer.load_all_objects(self.parser, self.current_file, self)
             # Update viewer controls
             self.update_viewer_controls()
     
@@ -1163,7 +1170,7 @@ Materials: {stats['materials']}"""
             self.statusBar().showMessage('Please load an OBJ file first')
             return
         
-        obj_name = item.data(Qt.UserRole)
+        obj_name = item.data(Qt.ItemDataRole.UserRole)
         obj_faces = self.parser.objects.get(obj_name, [])
         
         # In show-all mode, clicking text just shows details (no selection change)
@@ -1188,6 +1195,11 @@ Materials: {stats['materials']}"""
 Faces: {len(obj_faces)}
 Vertices: {len(used_vertices)}
 
+Object Size:
+  Dimensions (X×Y×Z): {size[0]:.3f} × {size[1]:.3f} × {size[2]:.3f}
+  Largest dimension: {max(size):.3f}
+  Estimated volume: {size[0] * size[1] * size[2]:.3f}
+
 Bounding Box:
   Min: [{min_bounds[0]:.3f}, {min_bounds[1]:.3f}, {min_bounds[2]:.3f}]
   Max: [{max_bounds[0]:.3f}, {max_bounds[1]:.3f}, {max_bounds[2]:.3f}]
@@ -1199,6 +1211,11 @@ First 10 faces:
             details = f"""Object: {obj_name}
 Faces: {len(obj_faces)}
 Vertices: 0
+
+Object Size:
+  Dimensions (X×Y×Z): 0.000 × 0.000 × 0.000
+  Largest dimension: 0.000
+  Estimated volume: 0.000
 
 First 10 faces:
 """
@@ -1224,11 +1241,11 @@ First 10 faces:
             self.statusBar().showMessage('Please load an OBJ file first')
             return
         
-        obj_name = item.data(Qt.UserRole)
+        obj_name = item.data(Qt.ItemDataRole.UserRole)
         
         if not self.show_all_button.isChecked():
             # In single-object mode, checkboxes control which objects to display
-            if item.checkState() == Qt.Checked:
+            if item.checkState() == Qt.CheckState.Checked:
                 self.viewer.selected_objects.add(obj_name)
             else:
                 self.viewer.selected_objects.discard(obj_name)
@@ -1247,7 +1264,7 @@ First 10 faces:
             return
         
         # Update viewer selection based on checkbox state
-        if item.checkState() == Qt.Checked:
+        if item.checkState() == Qt.CheckState.Checked:
             if obj_name not in self.viewer.selected_objects:
                 self.viewer.selected_objects.add(obj_name)
                 self.viewer.update()
@@ -1260,13 +1277,13 @@ First 10 faces:
         """Select all objects"""
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
-            item.setCheckState(Qt.Checked)
+            item.setCheckState(Qt.CheckState.Checked)
     
     def select_no_objects(self):
         """Deselect all objects"""
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
-            item.setCheckState(Qt.Unchecked)
+            item.setCheckState(Qt.CheckState.Unchecked)
     
     def toggle_show_all(self, checked):
         """Toggle between single object and all objects view"""
@@ -1290,15 +1307,15 @@ First 10 faces:
             # Sync checkbox states with viewer selection
             for i in range(self.objects_list.count()):
                 item = self.objects_list.item(i)
-                obj_name = item.data(Qt.UserRole)
-                item.setCheckState(Qt.Checked if obj_name in self.viewer.selected_objects else Qt.Unchecked)
+                obj_name = item.data(Qt.ItemDataRole.UserRole)
+                item.setCheckState(Qt.CheckState.Checked if obj_name in self.viewer.selected_objects else Qt.CheckState.Unchecked)
         else:
             self.show_all_button.setText('Single Object')
             # Clear viewer selections when switching to single mode
             self.viewer.selected_objects.clear()
             # Clear all checkbox selections for clean start
             for i in range(self.objects_list.count()):
-                self.objects_list.item(i).setCheckState(Qt.Unchecked)
+                self.objects_list.item(i).setCheckState(Qt.CheckState.Unchecked)
         
         self.update_viewer_controls()
     
@@ -1357,8 +1374,8 @@ First 10 faces:
         selected_objects = []
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
-            if item.checkState() == Qt.Checked:
-                selected_objects.append(item.data(Qt.UserRole))
+            if item.checkState() == Qt.CheckState.Checked:
+                selected_objects.append(item.data(Qt.ItemDataRole.UserRole))
         
         if not selected_objects:
             QMessageBox.warning(self, 'No Selection', 'Please select at least one object to export.')
@@ -1540,11 +1557,11 @@ Maximum cache size is limited to 1 GB."""
         reply = QMessageBox.question(
             self, 'Clear Cache',
             'Are you sure you want to clear all cached data?\nThis will require reprocessing models on next load.',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
         
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             cache = get_cache()
             cache.clear_cache()
             QMessageBox.information(self, 'Cache Cleared', 'All cache has been cleared.')
@@ -1602,7 +1619,7 @@ def main():
     app = QApplication(sys.argv)
     window = OBJProcessorApp()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

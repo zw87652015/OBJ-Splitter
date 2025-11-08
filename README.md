@@ -1,6 +1,6 @@
 # OBJ Model Processor with 3D Viewer
 
-A PyQt5 application for analyzing, visualizing, and exporting OBJ 3D model files with GPU-accelerated rendering, intelligent caching, and 3D printing support.
+A PyQt6 application with Material Design 3 styling for analyzing, visualizing, and exporting OBJ 3D model files with GPU-accelerated rendering, intelligent caching, and 3D printing support.
 
 ## Features
 
@@ -30,7 +30,7 @@ install.bat
 **Option 2: Manual Installation**
 ```bash
 # Install dependencies using Aliyun mirror (faster in China)
-pip install PyQt5==5.15.10 numpy PyOpenGL==3.1.7 -i https://mirrors.aliyun.com/pypi/simple/
+pip install PyQt6==6.10.0 numpy PyOpenGL==3.1.7 -i https://mirrors.aliyun.com/pypi/simple/
 
 # Optional: Install PyOpenGL-accelerate for better performance
 # Requires Microsoft Visual C++ Build Tools
@@ -186,12 +186,13 @@ ObjModelProcessor/
 ## Development
 
 ### Dependencies
-- **PyQt5**: GUI framework
+- **PyQt6**: Modern GUI framework with Material Design 3 support
 - **PyOpenGL**: 3D rendering
 - **NumPy**: Numerical computations
 
 ### Key Components
-- **main.py**: Main application with PyQt5 GUI
+- **main.py**: Main application with PyQt6 GUI and Material Design 3 styling
+- **md3_styles.py**: Material Design 3 color system and stylesheets
 - **OBJViewer**: OpenGL 3D widget with GPU rendering
 - **MeshSimplifier**: LOD generation algorithms
 - **ModelCache**: Content-based caching system

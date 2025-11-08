@@ -1,0 +1,13 @@
+# Build requirements for OBJ Model Processor executable
+# Install with: pip install -r requirements_build.txt
+
+# Core application dependencies
+PyQt6==6.6.1
+PyOpenGL==3.1.7
+numpy==1.26.2
+
+# Build tools
+pyinstaller==6.3.0
+
+# Optional: For creating installer (Windows)
+# nsis>=3.0  # Requires manual installation of NSIS

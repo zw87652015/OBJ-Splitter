@@ -100,6 +100,101 @@ exports/
 *.bak
 *.backup
 
+PyQt6MD3Guide/
 # Test files (optional)
 # test_*.obj
 # sample_*.obj
+
+# Build and release files
+*.exe
+*.app
+*.dmg
+*.deb
+*.rpm
+*.msi
+*.zip
+*.tar.gz
+*.rar
+
+# PyInstaller specific
+*.spec
+*.manifest
+*.toc
+*.pyd
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.def
+
+# Windows build artifacts
+*.dll
+version_info.txt
+installer.nsi
+
+# Release directories
+release/
+releases/
+deploy/
+
+# Local configuration and settings
+ui_settings.json
+settings.json
+config.json
+*.json.local
+
+# Build script outputs
+build_output/
+installer_output/
+
+# Package manager locks
+package-lock.json
+yarn.lock
+Pipfile.lock
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Documentation build
+docs/_build/
+site/
+
+# Performance profiling
+*.prof
+*.profile
+
+# Memory dumps
+*.dmp
+*.hdmp
+
+# GPU/CUDA files (if applicable)
+*.cu
+*.ptx
+*.cubin
+*.spv
+*.frag
+*.vert
+
+# Export and processed files
+exported_*.obj
+split_*.obj
+processed_*.obj
+*.vbo
+*.lod
+
+# Additional 3D formats
+*.stl
+*.ply
+*.fbx
+*.dae
+*.3ds
+*.blend
+
+# EXE-local data folder (user settings and cache)
+OBJ_Processor_Data/
+
+.windsurf/

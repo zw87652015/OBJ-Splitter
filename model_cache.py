@@ -17,9 +17,16 @@ class ModelCache:
     def __init__(self, cache_dir=None):
         """Initialize cache system"""
         if cache_dir is None:
-            # Use project directory for cache
-            project_dir = Path(__file__).parent
-            cache_dir = project_dir / ".cache"
+            # Check if running as compiled EXE
+            import sys
+            if getattr(sys, 'frozen', False):
+                # Running as compiled EXE - use EXE-local data folder
+                exe_dir = Path(sys.executable).parent
+                cache_dir = exe_dir / 'OBJ_Processor_Data' / 'cache'
+            else:
+                # Running as script - use local .cache directory
+                project_dir = Path(__file__).parent
+                cache_dir = project_dir / ".cache"
         
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)

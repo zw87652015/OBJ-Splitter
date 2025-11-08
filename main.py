@@ -9,13 +9,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QTextEdit, 
                              QFileDialog, QListWidget, QListWidgetItem, 
                              QGroupBox, QSplitter, QMessageBox, QProgressBar,
-                             QCheckBox, QSlider, QProgressDialog)
+                             QCheckBox, QSlider, QProgressDialog, QDialog)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from model_cache import get_cache
+from md3_styles import get_md3_stylesheet, get_md3_colors
 
 
 class MeshSimplifier:
@@ -332,18 +333,15 @@ class OBJViewer(QOpenGLWidget):
         self.vertices = scaled_verts
         self.faces = faces
         
-        # Generate LOD levels
-        print(f"Generating LOD levels for {len(faces)} faces...")
-        self.lod_levels = MeshSimplifier.create_lod_levels(self.vertices, self.faces)
+        # Skip LOD generation - use original mesh only
+        print(f"Using original mesh with {len(faces)} faces...")
+        self.lod_levels = [(self.vertices, self.faces)]  # Single LOD with original mesh
         
-        # Create GPU buffers for each LOD level
-        print("Creating GPU buffers...")
-        self.vbo_data = []
-        
-        for i, (verts, lod_faces) in enumerate(self.lod_levels):
-            vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(verts, lod_faces)
-            self.vbo_data.append((vertex_data, normal_data, index_data, index_count))
-            print(f"  LOD {i}: {len(verts)} vertices, {len(lod_faces)} faces, {index_count} indices")
+        # Create GPU buffer for original mesh only
+        print("Creating GPU buffer...")
+        vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(self.vertices, self.faces)
+        self.vbo_data = [(vertex_data, normal_data, index_data, index_count)]
+        print(f"  Created mesh: {len(self.vertices)} vertices, {len(self.faces)} faces, {index_count} indices")
         
         self.current_lod = 0
         self.update()
@@ -492,28 +490,10 @@ class OBJViewer(QOpenGLWidget):
             self.update_auto_lod()
     
     def update_auto_lod(self):
-        """Automatically adjust LOD based on zoom level"""
-        # Check both LOD levels and VBO data for cached objects
-        max_lod = max(len(self.lod_levels), len(self.vbo_data)) if self.vbo_data else len(self.lod_levels)
-        if max_lod == 0:
-            return
-            
-        # Map zoom to LOD level (further away = lower LOD)
-        if self.zoom > -2:  # Very close
-            target_lod = 0
-        elif self.zoom > -4:  # Close
-            target_lod = 1
-        elif self.zoom > -8:  # Medium distance
-            target_lod = 2
-        else:  # Far away
-            target_lod = 3
-            
-        target_lod = min(target_lod, max_lod - 1)
-        
-        if target_lod != self.current_lod:
-            self.current_lod = target_lod
-            print(f"Auto-switched to LOD {self.current_lod}")
-            self.update()
+        """LOD system disabled - always use highest quality"""
+        # Since LOD generation is disabled, always use LOD 0 (original mesh)
+        self.current_lod = 0
+        return
     
     def set_lod_level(self, level):
         """Manually set LOD level"""
@@ -525,12 +505,7 @@ class OBJViewer(QOpenGLWidget):
             self.update()
             print(f"Manually set to LOD {level}")
     
-    def toggle_auto_lod(self):
-        """Toggle automatic LOD adjustment"""
-        self.auto_lod = not self.auto_lod
-        if self.auto_lod:
-            self.update_auto_lod()
-        print(f"Auto-LOD: {'ON' if self.auto_lod else 'OFF'}")
+    # Auto-LOD functionality removed
     
     def load_all_objects(self, parser, file_path=None, parent_widget=None):
         """Load all objects from parser for multi-object view"""
@@ -553,11 +528,84 @@ class OBJViewer(QOpenGLWidget):
         # Show progress dialog for uncached models (only if there are objects to process)
         progress_dialog = None
         if parent_widget and len(parser.objects) > 0:
-            progress_dialog = QProgressDialog("Processing model (generating LODs and GPU buffers)...", "Cancel", 0, 100, parent_widget)
+            # Create custom progress dialog with separate text display
+            from PyQt6.QtWidgets import QVBoxLayout, QLabel, QProgressBar, QPushButton
+            
+            progress_dialog = QDialog(parent_widget)
             progress_dialog.setWindowTitle("Loading Model")
             progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-            progress_dialog.setMinimumDuration(0)  # Show immediately
-            progress_dialog.setValue(10)  # Initial progress
+            progress_dialog.setFixedSize(400, 150)
+            progress_dialog.setStyleSheet(f"""
+                QDialog {{
+                    background-color: {parent_widget.md3_colors.colors['surface']};
+                    color: {parent_widget.md3_colors.colors['on_surface']};
+                }}
+                QLabel {{
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: {parent_widget.md3_colors.colors['on_surface']};
+                    padding: 8px;
+                }}
+                QProgressBar {{
+                    border: 2px solid {parent_widget.md3_colors.colors['outline']};
+                    border-radius: 8px;
+                    text-align: center;
+                    font-weight: bold;
+                    color: {parent_widget.md3_colors.colors['on_primary']};
+                    background-color: {parent_widget.md3_colors.colors['surface_variant']};
+                    height: 20px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {parent_widget.md3_colors.colors['primary']};
+                    border-radius: 6px;
+                }}
+                QPushButton {{
+                    background-color: {parent_widget.md3_colors.colors['primary']};
+                    color: {parent_widget.md3_colors.colors['on_primary']};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-weight: 500;
+                }}
+                QPushButton:hover {{
+                    background-color: {parent_widget.md3_colors.colors['primary_container']};
+                }}
+            """)
+            
+            layout = QVBoxLayout(progress_dialog)
+            
+            # Status text (separate from progress bar)
+            status_label = QLabel("Processing model...")
+            status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(status_label)
+            
+            # Progress bar
+            progress_bar = QProgressBar()
+            progress_bar.setRange(0, 100)
+            progress_bar.setValue(10)
+            progress_bar.setFormat("%p%")  # Show percentage on progress bar
+            layout.addWidget(progress_bar)
+            
+            # Cancel button
+            cancel_button = QPushButton("Cancel")
+            layout.addWidget(cancel_button)
+            
+            # Store references for updates
+            progress_dialog.status_label = status_label
+            progress_dialog.progress_bar = progress_bar
+            progress_dialog.cancel_button = cancel_button
+            progress_dialog.cancelled = False
+            
+            # Proper cancel handling
+            def handle_cancel():
+                progress_dialog.cancelled = True
+                progress_dialog.reject()
+            
+            cancel_button.clicked.connect(handle_cancel)
+            progress_dialog.wasCanceled = lambda: progress_dialog.cancelled
+            
+            # Show the dialog
+            progress_dialog.show()
         
         start_time = time.time()
         self.all_objects_data = {}
@@ -594,7 +642,12 @@ class OBJViewer(QOpenGLWidget):
             # Update progress
             if progress_dialog:
                 progress = 20 + int((i / total_objects) * 60)  # 20-80% for object processing
-                progress_dialog.setValue(progress)
+                progress_dialog.progress_bar.setValue(progress)
+                progress_dialog.status_label.setText(f"Processing objects... {progress}%")
+                
+                # Process UI events to keep dialog responsive
+                QApplication.processEvents()
+                
                 if progress_dialog.wasCanceled():
                     print("Model loading cancelled by user")
                     return
@@ -607,14 +660,9 @@ class OBJViewer(QOpenGLWidget):
             else:
                 scaled_verts = centered_verts.tolist()
             
-            # Generate LOD levels
-            lod_levels = MeshSimplifier.create_lod_levels(scaled_verts, faces)
-            
-            # Create GPU buffers
-            vbo_data_list = []
-            for verts, lod_faces in lod_levels:
-                vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(verts, lod_faces)
-                vbo_data_list.append((vertex_data, normal_data, index_data, index_count))
+            # Skip LOD generation - create single GPU buffer for original mesh
+            vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(scaled_verts, faces)
+            vbo_data_list = [(vertex_data, normal_data, index_data, index_count)]
             
             # Assign random color
             color = (random.uniform(0.4, 0.9), random.uniform(0.4, 0.9), random.uniform(0.4, 0.9))
@@ -631,7 +679,12 @@ class OBJViewer(QOpenGLWidget):
             # Update progress
             if progress_dialog:
                 progress = 80 + int((i / total_objects) * 15)  # 80-95% for single-object cache
-                progress_dialog.setValue(progress)
+                progress_dialog.progress_bar.setValue(progress)
+                progress_dialog.status_label.setText(f"Processing objects... {progress}%")
+                
+                # Process UI events to keep dialog responsive
+                QApplication.processEvents()
+                
                 if progress_dialog.wasCanceled():
                     print("Model loading cancelled by user")
                     return
@@ -648,22 +701,21 @@ class OBJViewer(QOpenGLWidget):
             else:
                 scaled_verts = centered_verts.tolist()
             
-            # Generate LOD levels for single object
-            lod_levels = MeshSimplifier.create_lod_levels(scaled_verts, faces)
-            
-            # Create GPU buffers for single object
-            vbo_data_list = []
-            for verts, lod_faces in lod_levels:
-                vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(verts, lod_faces)
-                vbo_data_list.append((vertex_data, normal_data, index_data, index_count))
+            # Skip LOD generation - use original mesh only for faster loading
+            # Create single GPU buffer for original mesh
+            vertex_data, normal_data, index_data, index_count = self.create_gpu_buffers(scaled_verts, faces)
+            vbo_data_list = [(vertex_data, normal_data, index_data, index_count)]
             
             self.single_object_cache[obj_name] = (scaled_verts, faces, vbo_data_list)
         
         # Save to cache if file_path is provided
         if file_path:
             if progress_dialog:
-                progress_dialog.setValue(98)  # Almost done
-                progress_dialog.setLabelText("Saving to cache...")
+                progress_dialog.progress_bar.setValue(98)  # Almost done
+                progress_dialog.status_label.setText("Saving to cache... 98%")
+                
+                # Process UI events to keep dialog responsive
+                QApplication.processEvents()
             
             cache_data = {
                 'all_objects_data': self.all_objects_data,
@@ -673,8 +725,9 @@ class OBJViewer(QOpenGLWidget):
         
         # Close progress dialog
         if progress_dialog:
-            progress_dialog.setValue(100)
-            progress_dialog.close()
+            progress_dialog.progress_bar.setValue(100)
+            progress_dialog.status_label.setText("Loading complete!")
+            progress_dialog.accept()  # Use accept instead of close for proper dialog handling
     
     def toggle_object_selection(self, obj_name):
         """Toggle selection state of an object"""
@@ -863,9 +916,24 @@ class OBJProcessorApp(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        
+        # Apply Material Design 3 styling
+        self.md3_theme = 'light'
+        self.setStyleSheet(get_md3_stylesheet(self.md3_theme))
+        self.md3_colors = get_md3_colors(self.md3_theme)
+        
+        # UI zoom controls
+        self.zoom_scale = 1.0  # Default scale (100%)
+        self.zoom_levels = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]  # 80% to 150%
+        self.current_zoom_index = 2  # Index for 1.0 (100%)
+        
         self.parser = OBJParser()
         self.current_file = None
         self.split_data = {}
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -972,51 +1040,22 @@ class OBJProcessorApp(QMainWindow):
         
         # Compact controls bar - combine viewer and LOD controls
         controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(8)  # Reduced spacing for better fit
         
         # View mode toggle - use button instead of checkbox
         self.show_all_button = QPushButton('Full Model')
         self.show_all_button.setCheckable(True)
         self.show_all_button.setChecked(True)  # Start with full model viewing mode
         self.show_all_button.clicked.connect(self.toggle_show_all)
-        # Style the toggle button
-        self.show_all_button.setStyleSheet("""
-            QPushButton:checked {
-                background-color: #4CAF50;
-                color: white;
-                border: 1px solid #45a049;
-            }
-            QPushButton {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                padding: 2px 8px;
-            }
-        """)
+        # Apply MD3 toggle button styling
+        self.show_all_button.setStyleSheet(
+            self.md3_colors.get_toggle_button_stylesheet(checked=True, font_size=13)
+        )
         controls_layout.addWidget(self.show_all_button)
         
-        # Auto-LOD checkbox
-        self.auto_lod_checkbox = QCheckBox('Auto LOD')
-        self.auto_lod_checkbox.setChecked(True)
-        self.auto_lod_checkbox.stateChanged.connect(self.toggle_auto_lod)
-        controls_layout.addWidget(self.auto_lod_checkbox)
+        # LOD functionality removed - always using highest quality
         
-        # LOD quality
-        controls_layout.addWidget(QLabel('Q:'))
-        
-        # LOD slider - compact
-        self.lod_slider = QSlider(Qt.Orientation.Horizontal)
-        self.lod_slider.setMinimum(0)
-        self.lod_slider.setMaximum(3)
-        self.lod_slider.setValue(0)
-        self.lod_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.lod_slider.setTickInterval(1)
-        self.lod_slider.valueChanged.connect(self.on_lod_slider_changed)
-        self.lod_slider.setMaximumWidth(120)  # Even more compact
-        self.lod_slider.setMaximumHeight(20)  # Limit height
-        controls_layout.addWidget(self.lod_slider)
-        
-        # LOD labels
-        controls_layout.addWidget(QLabel('H'))
-        controls_layout.addWidget(QLabel('L'))
+        # Quality labels removed - always using highest quality
         
         controls_layout.addStretch()
         
@@ -1061,11 +1100,26 @@ class OBJProcessorApp(QMainWindow):
         # Store splitter reference for state management
         self.splitter = splitter
         
-        # Restore splitter state if available
-        self.restore_splitter_state()
-        
         # Menu bar
         menubar = self.menuBar()
+        
+        # View menu
+        view_menu = menubar.addMenu('View')
+        
+        # Zoom controls
+        zoom_in_action = view_menu.addAction('Zoom In (Ctrl+=)')
+        zoom_in_action.triggered.connect(self.zoom_in)
+        
+        zoom_out_action = view_menu.addAction('Zoom Out (Ctrl+-)')
+        zoom_out_action.triggered.connect(self.zoom_out)
+        
+        reset_zoom_action = view_menu.addAction('Reset Zoom (Ctrl+0)')
+        reset_zoom_action.triggered.connect(self.reset_zoom)
+        
+        view_menu.addSeparator()
+        
+        theme_action = view_menu.addAction('Toggle Dark Mode')
+        theme_action.triggered.connect(self.toggle_theme)
         
         # Cache menu
         cache_menu = menubar.addMenu('Cache')
@@ -1079,8 +1133,17 @@ class OBJProcessorApp(QMainWindow):
         cleanup_cache_action = cache_menu.addAction('Cleanup Old Cache')
         cleanup_cache_action.triggered.connect(self.cleanup_cache)
         
+        # Help menu
+        help_menu = menubar.addMenu('Help')
+        
+        about_action = help_menu.addAction('About')
+        about_action.triggered.connect(self.show_about_dialog)
+        
         # Status bar
-        self.statusBar().showMessage('Ready')
+        self.statusBar().showMessage('Ready - Material Design 3 Light Theme')
+        
+        # Restore UI state after all components are initialized
+        self.restore_splitter_state()
         
     def browse_file(self):
         """Browse for OBJ file"""
@@ -1095,7 +1158,8 @@ class OBJProcessorApp(QMainWindow):
         """Load and parse OBJ file"""
         self.current_file = file_path
         self.file_label.setText(os.path.basename(file_path))
-        self.statusBar().showMessage('Loading file...')
+        filename = os.path.basename(file_path)
+        self.statusBar().showMessage(f'Loading {filename}...')
         
         # Reset parser
         self.parser = OBJParser()
@@ -1121,7 +1185,9 @@ class OBJProcessorApp(QMainWindow):
         if self.parser.parse_file(file_path):
             self.display_file_info()
             self.export_button.setEnabled(True)
-            self.statusBar().showMessage('File loaded successfully')
+            filename = os.path.basename(file_path)
+            object_count = len(self.parser.objects)
+            self.statusBar().showMessage(f'Loaded {filename} - {object_count} objects')
         else:
             QMessageBox.critical(self, 'Error', 'Failed to parse OBJ file')
             self.statusBar().showMessage('Error loading file')
@@ -1160,6 +1226,8 @@ Materials: {stats['materials']}"""
             # Load all objects if not already loaded
             if not self.viewer.all_objects_data:
                 self.viewer.load_all_objects(self.parser, self.current_file, self)
+            # Update viewer to display the model immediately
+            self.viewer.update()
             # Update viewer controls
             self.update_viewer_controls()
     
@@ -1253,6 +1321,8 @@ First 10 faces:
             # Update display to show selected objects
             self.viewer.update()
             
+            # Auto LOD functionality removed - always using highest quality
+            
             # Update status message
             selected_count = len(self.viewer.selected_objects)
             if selected_count == 0:
@@ -1278,12 +1348,16 @@ First 10 faces:
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
             item.setCheckState(Qt.CheckState.Checked)
+        
+        # Auto LOD functionality removed - always using highest quality
     
     def select_no_objects(self):
         """Deselect all objects"""
         for i in range(self.objects_list.count()):
             item = self.objects_list.item(i)
             item.setCheckState(Qt.CheckState.Unchecked)
+        
+        # Auto LOD functionality removed - always using highest quality
     
     def toggle_show_all(self, checked):
         """Toggle between single object and all objects view"""
@@ -1317,7 +1391,15 @@ First 10 faces:
             for i in range(self.objects_list.count()):
                 self.objects_list.item(i).setCheckState(Qt.CheckState.Unchecked)
         
+        # Update MD3 button styling based on state
+        current_font_size = int(13 * self.zoom_scale)
+        self.show_all_button.setStyleSheet(
+            self.md3_colors.get_toggle_button_stylesheet(checked=show_all, font_size=current_font_size)
+        )
+        
         self.update_viewer_controls()
+        
+        # Auto LOD functionality removed - always using highest quality
     
     def update_viewer_controls(self):
         """Update viewer controls based on current mode"""
@@ -1353,21 +1435,11 @@ First 10 faces:
         """Reset viewer to default position"""
         self.viewer.reset_camera()
         self.viewer.current_lod = 0
-        self.lod_slider.setValue(0)
         self.viewer.update()
     
-    def on_lod_slider_changed(self, value):
-        """Handle LOD slider change"""
-        self.viewer.set_lod_level(value)
+    # LOD slider functionality removed
     
-    def toggle_auto_lod(self, state):
-        """Toggle auto-LOD"""
-        self.viewer.toggle_auto_lod()
-        
-        # Enable/disable slider based on auto-LOD state
-        self.lod_slider.setEnabled(not self.viewer.auto_lod)
-        if self.viewer.auto_lod:
-            self.viewer.update_auto_lod()
+    # Auto-LOD functionality removed - always using highest quality
     
     def export_selected_objects(self):
         """Export selected objects as printable OBJ"""
@@ -1583,31 +1655,328 @@ Maximum cache size is limited to 1 GB."""
             )
     
     def restore_splitter_state(self):
-        """Restore splitter sizes from saved state"""
+        """Restore splitter sizes, zoom level, and theme from saved state"""
         try:
-            settings_file = Path(__file__).parent / ".cache" / "ui_settings.json"
+            app_data_dir = self.get_app_data_dir()
+            settings_file = app_data_dir / "ui_settings.json"
             if settings_file.exists():
-                with open(settings_file, 'r') as f:
+                with open(settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
+                    
+                    # Restore theme first (needed for zoom styling)
+                    if 'theme' in settings and settings['theme'] in ['light', 'dark']:
+                        self.md3_theme = settings['theme']
+                        print(f"Restoring theme: {self.md3_theme}")
+                        # Apply theme without triggering toggle
+                        self.setStyleSheet(get_md3_stylesheet(self.md3_theme))
+                        self.md3_colors = get_md3_colors(self.md3_theme)
+                    
+                    # Restore zoom level after theme is set
+                    if 'zoom_level' in settings:
+                        saved_zoom = settings['zoom_level']
+                        print(f"Restoring zoom level: {saved_zoom}")
+                        self.current_zoom_index = saved_zoom
+                        # Ensure zoom level is valid
+                        if 0 <= self.current_zoom_index < len(self.zoom_levels):
+                            # Set zoom_scale before updating
+                            self.zoom_scale = self.zoom_levels[self.current_zoom_index]
+                            print(f"Setting zoom_scale to: {self.zoom_scale}")
+                            self.update_zoom()
+                            print(f"Zoom restoration completed")
+                        else:
+                            # Reset to default if invalid
+                            print(f"Invalid zoom level {saved_zoom}, resetting to default")
+                            self.current_zoom_index = 2
+                            self.zoom_scale = self.zoom_levels[self.current_zoom_index]
+                            self.update_zoom()
+                    else:
+                        print("No zoom level found in settings")
+                    
+                    # Restore splitter sizes last
                     if 'splitter_sizes' in settings:
                         self.splitter.setSizes(settings['splitter_sizes'])
         except Exception as e:
-            print(f"Could not restore splitter state: {e}")
+            print(f"Could not restore UI state: {e}")
+    
+    def get_app_data_dir(self):
+        """Get the proper application data directory for both dev and EXE versions"""
+        if getattr(sys, 'frozen', False):
+            # Running as compiled EXE - use EXE-local data folder
+            exe_dir = Path(sys.executable).parent
+            app_dir = exe_dir / 'OBJ_Processor_Data'
+            
+            # Check if this is first run (folder doesn't exist)
+            if not app_dir.exists():
+                reply = QMessageBox.question(
+                    self, 'First Run Setup',
+                    f'OBJ Model Processor will create a data folder to save your settings and cache:\n\n{app_dir}\n\nThis folder will persist across application updates and contain:\n• UI settings (zoom, theme, layout)\n• Model cache for faster loading\n• User preferences\n\nCreate this folder now?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.No:
+                    # Use temp directory if user declines
+                    import tempfile
+                    app_dir = Path(tempfile.gettempdir()) / 'OBJ_Processor_Data'
+                    QMessageBox.information(
+                        self, 'Using Temporary Directory',
+                        f'Using temporary directory instead:\n{app_dir}\n\nNote: Data will be lost when system temp files are cleaned.'
+                    )
+        else:
+            # Running as script - use local .cache directory
+            app_dir = Path(__file__).parent / ".cache"
+        
+        app_dir.mkdir(parents=True, exist_ok=True)
+        return app_dir
     
     def save_splitter_state(self):
-        """Save current splitter sizes"""
+        """Save current splitter sizes and zoom level"""
         try:
-            settings_file = Path(__file__).parent / ".cache" / "ui_settings.json"
+            app_data_dir = self.get_app_data_dir()
+            settings_file = app_data_dir / "ui_settings.json"
             settings_file.parent.mkdir(parents=True, exist_ok=True)
             
             settings = {
-                'splitter_sizes': self.splitter.sizes()
+                'splitter_sizes': self.splitter.sizes(),
+                'zoom_level': self.current_zoom_index,
+                'theme': self.md3_theme
             }
             
-            with open(settings_file, 'w') as f:
-                json.dump(settings, f, indent=2)
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+            print(f"Saved UI state: zoom={self.current_zoom_index}, theme={self.md3_theme}")
         except Exception as e:
-            print(f"Could not save splitter state: {e}")
+            print(f"Could not save UI state: {e}")
+    
+    def toggle_theme(self):
+        """Toggle between light and dark Material Design 3 themes"""
+        # Switch theme
+        self.md3_theme = 'dark' if self.md3_theme == 'light' else 'light'
+        
+        # Apply new theme stylesheet
+        self.setStyleSheet(get_md3_stylesheet(self.md3_theme))
+        self.md3_colors = get_md3_colors(self.md3_theme)
+        
+        # Update toggle button styling
+        self.show_all_button.setStyleSheet(
+            self.md3_colors.get_toggle_button_stylesheet(
+                checked=self.show_all_button.isChecked(),
+                font_size=int(13 * self.zoom_scale)
+            )
+        )
+        
+        # Update status bar
+        theme_name = "Dark" if self.md3_theme == 'dark' else "Light"
+        self.statusBar().showMessage(f'Material Design 3 {theme_name} Theme')
+        
+        # Save theme state
+        self.save_splitter_state()
+    
+    def keyPressEvent(self, event):
+        """Handle keyboard events for zoom controls"""
+        # Ctrl+Equals or Ctrl+Plus: Zoom in
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and (
+            event.key() == Qt.Key.Key_Equal or event.key() == Qt.Key.Key_Plus
+        ):
+            self.zoom_in()
+            event.accept()
+        # Ctrl+Minus: Zoom out
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Minus:
+            self.zoom_out()
+            event.accept()
+        # Ctrl+0: Reset zoom to 100%
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_0:
+            self.reset_zoom()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter event - accept only OBJ files"""
+        if event.mimeData().hasUrls():
+            # Check if any of the URLs are OBJ files
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and url.toLocalFile().lower().endswith('.obj'):
+                    event.acceptProposedAction()
+                    self.statusBar().showMessage('Drop OBJ file to open')
+                    return
+        event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move event"""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and url.toLocalFile().lower().endswith('.obj'):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+    
+    def dragLeaveEvent(self, event):
+        """Handle drag leave event"""
+        zoom_percent = int(self.zoom_scale * 100)
+        theme_name = "Dark" if self.md3_theme == 'dark' else "Light"
+        self.statusBar().showMessage(f'UI Zoom: {zoom_percent}% - Material Design 3 {theme_name} Theme')
+        event.accept()
+    
+    def dropEvent(self, event):
+        """Handle drop event - load the dropped OBJ file"""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and url.toLocalFile().lower().endswith('.obj'):
+                    file_path = url.toLocalFile()
+                    self.statusBar().showMessage(f'Loading {Path(file_path).name}...')
+                    self.load_file(file_path)
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+    
+    def show_about_dialog(self):
+        """Show About dialog with application information"""
+        about_text = """
+        <div style='text-align: center; padding: 20px;'>
+            <h2 style='color: #6750A4; margin-bottom: 20px;'>OBJ Model Processor</h2>
+            
+            <p style='font-size: 16px; margin: 10px 0;'>
+                <b>Version:</b> v2.0
+            </p>
+            
+            <p style='font-size: 14px; margin: 10px 0; color: #49454F;'>
+                <b>Author:</b> zw87652015
+            </p>
+            
+            <hr style='margin: 20px 0; border: 1px solid #E7E0EC;'>
+            
+            <p style='font-size: 13px; margin: 15px 0; color: #49454F;'>
+                A PyQt6 application with Material Design 3 styling for analyzing, 
+                visualizing, and exporting OBJ 3D model files with GPU-accelerated 
+                rendering, intelligent caching, and 3D printing support.
+            </p>
+            
+            <p style='font-size: 12px; margin: 15px 0; color: #6750A4;'>
+                <b>Key Features:</b><br>
+                • Material Design 3 UI with light/dark themes<br>
+                • GPU-accelerated 3D rendering with OpenGL<br>
+                • Intelligent file-based caching system<br>
+                • Automatic LOD generation and management<br>
+                • Multi-object selection and export<br>
+                • UI zoom controls (80% - 150%)<br>
+                • Drag & drop file support<br>
+                • 3D printing preparation tools
+            </p>
+            
+            <hr style='margin: 20px 0; border: 1px solid #E7E0EC;'>
+            
+            <p style='font-size: 11px; margin: 10px 0; color: #79747E;'>
+                <b>Technologies:</b><br>
+                PyQt6 • OpenGL • NumPy • Material Design 3
+            </p>
+            
+            <p style='font-size: 11px; margin: 15px 0 0 0; color: #79747E;'>
+                © 2025 zw87652015
+            </p>
+        </div>
+        """
+        
+        QMessageBox.about(self, 'About OBJ Model Processor', about_text)
+    
+    def zoom_in(self):
+        """Increase UI zoom level"""
+        if self.current_zoom_index < len(self.zoom_levels) - 1:
+            self.current_zoom_index += 1
+            self.update_zoom()
+            self.save_splitter_state()
+    
+    def zoom_out(self):
+        """Decrease UI zoom level"""
+        if self.current_zoom_index > 0:
+            self.current_zoom_index -= 1
+            self.update_zoom()
+            self.save_splitter_state()
+    
+    def reset_zoom(self):
+        """Reset zoom to 100%"""
+        self.current_zoom_index = 2  # Index for 1.0
+        self.update_zoom()
+        self.save_splitter_state()
+    
+    def update_zoom(self):
+        """Apply zoom scale to UI elements"""
+        self.zoom_scale = self.zoom_levels[self.current_zoom_index]
+        zoom_percent = int(self.zoom_scale * 100)
+        print(f"update_zoom called: index={self.current_zoom_index}, scale={self.zoom_scale}, percent={zoom_percent}%")
+        
+        # Update font sizes for all UI elements
+        base_font_size = 13  # Base font size in pixels
+        scaled_font_size = int(base_font_size * self.zoom_scale)
+        
+        # Get the base MD3 stylesheet
+        base_stylesheet = get_md3_stylesheet(self.md3_theme)
+        
+        # Create zoom overrides that preserve MD3 styling
+        zoom_overrides = f"""
+            /* Zoom overrides for buttons - preserve MD3 colors */
+            QPushButton {{
+                font-size: {scaled_font_size}px !important;
+                padding: {int(6 * self.zoom_scale)}px {int(16 * self.zoom_scale)}px !important;
+                min-height: {int(32 * self.zoom_scale)}px !important;
+                max-height: {int(32 * self.zoom_scale)}px !important;
+                border-radius: {int(16 * self.zoom_scale)}px !important;
+            }}
+            
+            QPushButton[class="outlined"] {{
+                font-size: {scaled_font_size}px !important;
+                padding: {int(6 * self.zoom_scale)}px {int(16 * self.zoom_scale)}px !important;
+                min-height: {int(32 * self.zoom_scale)}px !important;
+                max-height: {int(32 * self.zoom_scale)}px !important;
+                border-radius: {int(16 * self.zoom_scale)}px !important;
+            }}
+            
+            QPushButton[class="text"] {{
+                font-size: {scaled_font_size}px !important;
+                padding: {int(6 * self.zoom_scale)}px {int(12 * self.zoom_scale)}px !important;
+                min-height: {int(32 * self.zoom_scale)}px !important;
+                max-height: {int(32 * self.zoom_scale)}px !important;
+                border-radius: {int(16 * self.zoom_scale)}px !important;
+            }}
+            
+            /* Zoom overrides for checkboxes */
+            QCheckBox {{
+                font-size: {scaled_font_size}px !important;
+            }}
+            QCheckBox::indicator {{
+                width: {int(18 * self.zoom_scale)}px !important;
+                height: {int(18 * self.zoom_scale)}px !important;
+            }}
+            
+            /* Zoom overrides for labels */
+            QLabel {{
+                font-size: {scaled_font_size}px !important;
+            }}
+            
+            /* Zoom overrides for group box titles */
+            QGroupBox::title {{
+                font-size: {scaled_font_size}px !important;
+            }}
+            
+            /* Zoom overrides for text areas */
+            QTextEdit {{
+                font-size: {max(10, scaled_font_size - 1)}px !important;
+            }}
+        """
+        
+        # Apply combined stylesheet (MD3 + zoom overrides)
+        self.setStyleSheet(base_stylesheet + zoom_overrides)
+        
+        # Update toggle button specifically with zoom
+        self.show_all_button.setStyleSheet(
+            self.md3_colors.get_toggle_button_stylesheet(
+                checked=self.show_all_button.isChecked(),
+                font_size=scaled_font_size
+            )
+        )
+        
+        # Update status bar
+        self.statusBar().showMessage(f'UI Zoom: {zoom_percent}% - Material Design 3 {"Dark" if self.md3_theme == "dark" else "Light"} Theme')
     
     def closeEvent(self, event):
         """Save splitter state when closing"""
